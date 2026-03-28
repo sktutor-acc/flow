@@ -252,6 +252,7 @@ canvas{max-height:220px;}
       <button class="nav-item" onclick="go('txn',this)"><span>📋</span> รายการ</button>
       <button class="nav-item" onclick="go('charts',this)"><span>📈</span> กราฟ</button>
       <button class="nav-item" onclick="go('report',this)"><span>📑</span> รายงาน PDF</button>
+      <button class="nav-item" onclick="go('team',this)"><span>👥</span> ทีมงาน</button>
       <div class="nav-sep"></div>
       <button class="nav-item" onclick="go('settings',this)"><span>⚙️</span> ตั้งค่า</button>
     </nav>
@@ -354,6 +355,35 @@ canvas{max-height:220px;}
       <div id="rp-preview" style="background:var(--white);border:1px solid var(--border);border-radius:var(--r);padding:28px;"></div>
     </div>
 
+
+    <!-- TEAM -->
+    <div class="page" id="page-team">
+      <div class="ph">
+        <div><h1>ทีมงาน</h1><p>สรุปรายการแยกตามผู้บันทึก</p></div>
+        <div class="btn-row">
+          <button class="btn btn-ghost btn-sm" onclick="loadAll().then(renderTeam)">🔄 รีเฟรช</button>
+        </div>
+      </div>
+
+      <!-- กรองตามวันที่ -->
+      <div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r);padding:18px 20px;margin-bottom:20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <span style="font-size:13px;font-weight:600;color:var(--muted);">ช่วงวันที่</span>
+        <div class="fg" style="flex-direction:row;align-items:center;gap:8px;">
+          <input type="date" id="team-from" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--rx);font-family:'Sarabun',sans-serif;font-size:13px;color:var(--text);background:var(--white);outline:none;">
+          <span style="color:var(--muted)">ถึง</span>
+          <input type="date" id="team-to" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--rx);font-family:'Sarabun',sans-serif;font-size:13px;color:var(--text);background:var(--white);outline:none;">
+        </div>
+        <button class="btn btn-pink btn-sm" onclick="renderTeam()">🔍 ค้นหา</button>
+        <button class="btn btn-ghost btn-sm" onclick="clearTeamFilter()">✕ ล้าง</button>
+      </div>
+
+      <!-- สรุปรายคน -->
+      <div id="team-summary" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin-bottom:20px;"></div>
+
+      <!-- ตารางรายการแยกตามคน -->
+      <div id="team-detail"></div>
+    </div>
+
     <!-- SETTINGS -->
     <div class="page" id="page-settings">
       <div class="ph"><div><h1>ตั้งค่า</h1></div></div>
@@ -417,7 +447,7 @@ canvas{max-height:220px;}
   <button class="mob-btn" onclick="go('txn',this)"><span style="font-size:20px">📋</span>รายการ</button>
   <button class="mob-btn" onclick="go('charts',this)"><span style="font-size:20px">📈</span>กราฟ</button>
   <button class="mob-btn" onclick="go('report',this)"><span style="font-size:20px">📑</span>PDF</button>
-  <button class="mob-btn" onclick="go('settings',this)"><span style="font-size:20px">⚙️</span>ตั้งค่า</button>
+  <button class="mob-btn" onclick="go('team',this)"><span style="font-size:20px">👥</span>ทีมงาน</button>
 </div>
 
 <!-- EDIT MODAL -->
@@ -624,6 +654,7 @@ function go(p, el) {
   document.getElementById('page-'+p).classList.add('on');
   if (el) el.classList.add('on');
   if (p === 'charts') setTimeout(renderCharts, 60);
+  if (p === 'team') setTimeout(renderTeam, 60);
   if (p === 'report') setTimeout(buildPreview, 60);
 }
 
@@ -649,7 +680,7 @@ function addTxn() {
   var cat  = document.getElementById('fcat').value;
   var amt  = parseFloat(document.getElementById('famt').value);
   if (!date||!desc||!amt||amt<=0) { alert('กรุณากรอกข้อมูลให้ครบ'); return; }
-  api('addTxn', {date:date, desc:desc, cat:cat, amount:amt, type:cType, by:CU.display}).then(function() {
+  api('addTxn', {date:date, desc:desc, cat:cat, amount:amt, type:cType, by:CU.display, createdAt:new Date().toISOString()}).then(function() {
     document.getElementById('fdesc').value = '';
     document.getElementById('famt').value = '';
     loadAll();
@@ -804,7 +835,11 @@ function renderCats() {
   ['income','expense'].forEach(function(type) {
     var el = document.getElementById('cats-' + type.slice(0,3));
     el.innerHTML = (cats[type]||[]).map(function(c,i) {
-      return '<div class="cat-item"><span><span class="cat-dot" style="background:'+PALETTE[i%PALETTE.length]+'"></span>'+c+'</span>'+(i>0?'<button class="btn btn-ghost btn-xs" onclick="delCat(\''+type+'\',\''+c+'\')">✕</button>':'<span></span>')+'</div>';
+      // ใช้ index แทนชื่อ เพื่อหลีกเลี่ยงปัญหา quote ในชื่อหมวดหมู่
+      var delBtn = i > 0
+        ? '<button class="btn btn-ghost btn-xs" onclick="delCatByIndex(\''+type+'\','+i+')">✕</button>'
+        : '<span></span>';
+      return '<div class="cat-item"><span><span class="cat-dot" style="background:'+PALETTE[i%PALETTE.length]+'"></span>'+c+'</span>'+delBtn+'</div>';
     }).join('');
   });
 }
@@ -815,6 +850,12 @@ function addCat(type) {
   api('addCat',{type:type,name:name}).then(function(){ document.getElementById(id).value=''; loadAll(); }).catch(function(e){alert('เกิดข้อผิดพลาด: '+e.message);});
 }
 function delCat(type, name) {
+  if (!confirm('ลบหมวดหมู่ "'+name+'"?')) return;
+  api('deleteCat',{type:type,name:name}).then(function(){ loadAll(); }).catch(function(e){alert('เกิดข้อผิดพลาด: '+e.message);});
+}
+function delCatByIndex(type, idx) {
+  var name = (cats[type]||[])[idx];
+  if (!name) { alert('ไม่พบหมวดหมู่'); return; }
   if (!confirm('ลบหมวดหมู่ "'+name+'"?')) return;
   api('deleteCat',{type:type,name:name}).then(function(){ loadAll(); }).catch(function(e){alert('เกิดข้อผิดพลาด: '+e.message);});
 }
@@ -969,6 +1010,93 @@ function doPrint() {
   pd.style.display = 'block';
   window.print();
   setTimeout(function(){ document.getElementById('app').style.display='flex'; pd.style.display='none'; }, 600);
+}
+
+// ============================================================
+//  TEAM PAGE
+// ============================================================
+function renderTeam() {
+  var from = document.getElementById('team-from').value;
+  var to   = document.getElementById('team-to').value;
+
+  var filtered = txns.filter(function(t) {
+    if (from && String(t.date) < from) return false;
+    if (to   && String(t.date) > to)   return false;
+    return true;
+  });
+
+  // จัดกลุ่มตามคน
+  var byPerson = {};
+  filtered.forEach(function(t) {
+    var name = t.by || 'ไม่ระบุ';
+    if (!byPerson[name]) byPerson[name] = {name:name, txns:[], inc:0, exp:0};
+    byPerson[name].txns.push(t);
+    if (t.type==='income')  byPerson[name].inc += parseFloat(t.amount||0);
+    if (t.type==='expense') byPerson[name].exp += parseFloat(t.amount||0);
+  });
+
+  var persons = Object.values(byPerson).sort(function(a,b){ return b.txns.length - a.txns.length; });
+
+  // ── Summary Cards ──
+  var summaryHTML = persons.map(function(p, i) {
+    var colors = ['#FF6B9D','#00C896','#5BA4F5','#9B8FF5','#FFD166','#FF8C69'];
+    var color = colors[i % colors.length];
+    var bal = p.inc - p.exp;
+    return '<div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r);padding:18px 20px;">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">' +
+        '<div style="width:38px;height:38px;border-radius:50%;background:'+color+';display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;font-weight:700;flex-shrink:0;">' + p.name[0].toUpperCase() + '</div>' +
+        '<div>' +
+          '<div style="font-size:14px;font-weight:700;">' + p.name + '</div>' +
+          '<div style="font-size:11px;color:var(--muted);">' + p.txns.length + ' รายการ</div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center;">' +
+        '<div style="background:var(--mint-l);border-radius:8px;padding:8px;">' +
+          '<div style="font-size:10px;color:var(--mint);font-weight:600;margin-bottom:3px;">รายรับ</div>' +
+          '<div style="font-size:13px;font-weight:700;color:var(--mint);">' + fmt(p.inc) + '</div>' +
+        '</div>' +
+        '<div style="background:var(--pink-l);border-radius:8px;padding:8px;">' +
+          '<div style="font-size:10px;color:var(--pink);font-weight:600;margin-bottom:3px;">รายจ่าย</div>' +
+          '<div style="font-size:13px;font-weight:700;color:var(--pink);">' + fmt(p.exp) + '</div>' +
+        '</div>' +
+        '<div style="background:var(--lav-l);border-radius:8px;padding:8px;">' +
+          '<div style="font-size:10px;color:var(--lav);font-weight:600;margin-bottom:3px;">สุทธิ</div>' +
+          '<div style="font-size:13px;font-weight:700;color:'+(bal>=0?'var(--mint)':'var(--pink)')+';">' + fmt(bal) + '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  document.getElementById('team-summary').innerHTML = summaryHTML || '<div style="color:var(--muted);font-size:13px;">ไม่มีข้อมูล</div>';
+
+  // ── Detail Table แยกตามคน ──
+  var detailHTML = persons.map(function(p) {
+    var sorted = p.txns.slice().sort(function(a,b){ return String(b.date)<String(a.date)?-1:1; });
+    var rows = sorted.map(function(t) {
+      return '<tr>' +
+        '<td style="color:var(--muted);font-size:12px;">' + t.date + '</td>' +
+        '<td style="font-size:12px;">' + (t.createdAt ? new Date(t.createdAt).toLocaleString('th-TH',{hour:'2-digit',minute:'2-digit'}) : '-') + '</td>' +
+        '<td style="font-weight:600;font-size:13px;">' + t.desc + '</td>' +
+        '<td style="color:var(--muted);font-size:12px;">' + t.cat + '</td>' +
+        '<td><span class="badge '+(t.type==='income'?'badge-inc':'badge-exp')+'" style="font-size:10px;">'+(t.type==='income'?'รายรับ':'รายจ่าย')+'</span></td>' +
+        '<td style="text-align:right;font-weight:700;" class="'+(t.type==='income'?'amt-inc':'amt-exp')+'">'+(t.type==='income'?'+':'-')+fmt(parseFloat(t.amount||0))+'</td>' +
+      '</tr>';
+    }).join('');
+    return '<div class="tbl-card" style="margin-bottom:16px;">' +
+      '<div class="tbl-head"><h3>📋 ' + p.name + ' <span style="font-size:12px;color:var(--muted);font-weight:400;">('+p.txns.length+' รายการ)</span></h3></div>' +
+      '<table><thead><tr>' +
+        '<th>วันที่</th><th>เวลาบันทึก</th><th>รายละเอียด</th><th>หมวดหมู่</th><th>ประเภท</th><th style="text-align:right;">จำนวนเงิน</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table>' +
+    '</div>';
+  }).join('');
+
+  document.getElementById('team-detail').innerHTML = detailHTML || '';
+}
+
+function clearTeamFilter() {
+  document.getElementById('team-from').value = '';
+  document.getElementById('team-to').value = '';
+  renderTeam();
 }
 
 // ============================================================
